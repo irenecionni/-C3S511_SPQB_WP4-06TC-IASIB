@@ -1,20 +1,103 @@
 ;*************************************************
-load "statistics2.ncl"
 load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/time_axis_labels.ncl"
 ;************************************************
-begin
 ;************************************************
+;functions
+; #############################################################################
+undef("coswgt_area_average")
+function coswgt_area_average(field:numeric)
+;
+; Arguments
+;    field: numeric field.
+;
+; Return value
+;    The area average using cosine lat weights.
+;
+; Description
+;    Computes the area average using cosine lat weights and lon weights=1.
+;
+local funcname, scriptname, lat, wgt_lat, lon, lon_size, wgt_lon, ave
+begin
+
+  funcname = "coswgt_area_average"
+  scriptname = "diag_scripts/shared/statistics.ncl"
+
+  lat = field&lat
+  wgt_lat = tofloat(NormCosWgtGlobe(lat))
+
+  lon = field&lon
+  lon_size = dimsizes(lon)
+  wgt_lon = new((/lon_size(0)/), float)
+  wgt_lon = 1.0
+
+  ave = wgt_areaave_Wrap(field, wgt_lat, wgt_lon, 0)
+  return(ave)
+
+end
+; #############################################################################
+undef("coswgt_area_std")
+function coswgt_area_std(field:numeric)
+;
+; Arguments
+;    field: numeric field.
+;
+; Return value
+;    The area average using cosine lat weights.
+;
+; Description
+;    Computes the area average using cosine lat weights and lon weights=1.
+;
+begin
+
+  funcname = "coswgt_area_std"
+
+   lat = field&lat
+   lon = field&lon
+   re   = 6.37122e06
+   rad  = 4.0 * atan(1.0) / 180.0
+   con  = re * rad
+   clat = cos(lat * rad)           ; cosine of latitude
+   dlon = (lon(2) - lon(1))        ; assume dlon is constant
+   dlat = (lat(2) - lat(1))        ; assume dlat is constant
+
+   dx   = con * dlon * clat        ; dx at each latitude
+   dy   = con * dlat               ; dy is constant
+   dydx = dy * dx                  ; dydx(nlat)
+   nlat=dimsizes(lat)
+   mlon=dimsizes(lon)
+   wgt  = new((/nlat, mlon/), typeof(dydx))
+   wgt=conform (wgt, dydx, 0)
+
+
+
+   ave = wgt_areaave2(field, wgt, 0)
+   d2 = (field - ave) ^ 2 ;
+     ; Calculate weighted standard deviation
+   ss=sum(d2)
+   arg = wgt_areasum2(d2, wgt, 0)
+
+   v1 = sum(where(ismissing(field), wgt@_FillValue, wgt))
+   v2 = sum(where(ismissing(field), wgt@_FillValue, wgt) ^ 2)
+   dd=(v1 / (v1 ^ 2 - v2))
+
+   out = sqrt( arg*dd)
+
+  return(out)
+
+
+end
+; #############################################################################
+
+begin
+
 ; read in netCDF file
 ;************************************************
-att="DAY"
-  a = addfile("/Users/irenecionni/obs_c3s/Tier3/CDS-TTC-IASI-B"+att+"/OBS_CDS-TTC-IASI-B_sat_L3_Amon_tropoz_201401-201812.nc" ,"r")
-;************************************************
-; read in zonal winds
+  att="NIGHT"
+  dir="/Users/irenecionni/"
+  a = addfile(dir+"obs_c3s/Tier3/CDS-TTC-IASI-B"+att+"/OBS_CDS-TTC-IASI-B_sat_L3_Amon_tropoz_201401-201812.nc" ,"r")
 ;************************************************
   tropoz=a->tropoz                                
-  printVarSummary(tropoz)
   dim=dimsizes(tropoz)
-  print(dim)
 
   avail1=new((/dim(1),dim(2)/),typeof(tropoz))
      do ilat=0,dim(1)-1
@@ -36,66 +119,55 @@ att="DAY"
           avail3(itim,ilat)=num(.not.ismissing(tropoz(itim,ilat,:)))/tofloat(dim(2))
       end do
     end do
-  avail_ts_Ar=new((/dim(0)/),typeof(tropoz))
-     do itim=0,dim(0)-1
-      tropoz_Ar=tropoz(itim,{19:25},{50:56})
-      printVarSummary(tropoz_Ar)
-      dim_Ar=dimsizes(tropoz_Ar)
+    avail_ts_Ar=new((/dim(0)/),typeof(tropoz))
+    do itim=0,dim(0)-1
+       tropoz_Ar=tropoz(itim,{19:25},{50:56})
+       dim_Ar=dimsizes(tropoz_Ar)
        avail_ts_Ar(itim)=num(.not.ismissing(tropoz_Ar))/(tofloat(dim_Ar(0)*dim_Ar(1)))
-     end do
-   print(avail_ts_Ar+" "+itim)
-   avail_ts_NAF=new((/dim(0)/),typeof(tropoz))
-     do itim=0,dim(0)-1
-      tropoz_NAF=tropoz(itim,{16:30},{-10:30})
-      printVarSummary(tropoz_NAF)
-      dim_NAF=dimsizes(tropoz_NAF)
+    end do
+    avail_ts_NAF=new((/dim(0)/),typeof(tropoz))
+    do itim=0,dim(0)-1
+       tropoz_NAF=tropoz(itim,{16:30},{-10:30})
+       dim_NAF=dimsizes(tropoz_NAF)
        avail_ts_NAF(itim)=num(.not.ismissing(tropoz_NAF))/(tofloat(dim_NAF(0)*dim_NAF(1)))
-     end do
-   print(avail_ts_NAF+" "+itim)
+    end do
 
+    avail_ts_NAF=where(avail_ts_NAF.le.0,avail_ts_NAF@_FillValue,avail_ts_NAF)
+    avail_ts_Ar=where(avail_ts_Ar.le.0,avail_ts_Ar@_FillValue,avail_ts_Ar)
+    avail_ts_NAF!0="time"
+    avail_ts_Ar!0="time"
+    avail_ts_NAF&time=tropoz&time
+    avail_ts_Ar&time=tropoz&time
 
-avail_ts_NAF=where(avail_ts_NAF.le.0,avail_ts_NAF@_FillValue,avail_ts_NAF)
-avail_ts_Ar=where(avail_ts_Ar.le.0,avail_ts_Ar@_FillValue,avail_ts_Ar)
-avail_ts_NAF!0="time"
-avail_ts_Ar!0="time"
-avail_ts_NAF&time=tropoz&time
-avail_ts_Ar&time=tropoz&time
-  printVarSummary(avail1)
-  avail1=where(avail1.le.0,avail1@_FillValue,avail1)
-  avail2=where(avail2.le.0,avail2@_FillValue,avail2)
-  avail3=where(avail3.le.0,avail3@_FillValue,avail3)
+    avail1!0="lat"
+    avail1!1="lon"
+    avail1&lat=tropoz&lat
+    avail1&lon=tropoz&lon
 
-  avail1!0="lat"
-  avail1!1="lon"
-  avail1&lat=tropoz&lat
-  avail1&lon=tropoz&lon
+    avail2!0="time"
+    avail2!1="lon"
+    avail2&time=tropoz&time
+    avail2&lon=tropoz&lon
 
-  avail2!0="time"
-  avail2!1="lon"
-  avail2&time=tropoz&time
-  avail2&lon=tropoz&lon
+    avail3!0="time"
+    avail3!1="lat"
+    avail3&time=tropoz&time
+    avail3&lat=tropoz&lat
 
-  avail3!0="time"
-  avail3!1="lat"
-  avail3&time=tropoz&time
-  avail3&lat=tropoz&lat
-
-; weighted average and stdeviation
-  avg_avail1=coswgt_areaave(avail1)
-  avg_std1=coswgt_areastd(avail1)
-  print(avg_avail1+"+"+avg_std1)
- avg2_avail=dim_avg_n_Wrap(avail2,0)
-    printVarSummary(avg2_avail)
-  avg3_avail=dim_avg_n_Wrap(avail3,0)
-   printVarSummary(avg3_avail)
+    avg_avail1=coswgt_area_average(avail1)
+    avg_std1=coswgt_area_std(avail1)
+    avg2_avail=dim_avg_n_Wrap(avail2,0)
+    avg3_avail=dim_avg_n_Wrap(avail3,0)
+    avail1=where(avail1.le.0,avail1@_FillValue,avail1)
+    avail2=where(avail2.le.0,avail2@_FillValue,avail2)
+    avail3=where(avail3.le.0,avail3@_FillValue,avail3)
 ;************************************************
 ; create plot
 ;************************************************
-  wks = gsn_open_wks("png","avail_1_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+  wks = gsn_open_wks("ps","Figure1_"+"OBS_CDS-TTC-IASI-B"+att)        
   gsn_define_colormap(wks,"MPL_YlGn")
 
   res = True                                    ; plot mods desired
-
   res@cnFillOn         = True               ; color Fill 
   res@cnFillMode       = "RasterFill"       ; Raster Mode
   res@cnLinesOn        =  False             ; Turn off contour lines
@@ -103,16 +175,15 @@ avail_ts_Ar&time=tropoz&time
   res@cnMinLevelValF       = 0.               ; set min contour level
   res@cnMaxLevelValF       = 1.               ; set max contour level
   res@cnLevelSpacingF      = 0.1               ; set contour spacing
-   res@cnLabelBarEndStyle="ExcludeOuterBoxes"
+  res@cnLabelBarEndStyle="ExcludeOuterBoxes"
   res@tiMainString         = "Data Availability as a fraction [1]"    ; plot title
   fmt = "%3.2f"
   res@gsnLeftString      = "mean: "+sprintf(fmt,avg_avail1)
   res@gsnRightString     = " std:"+sprintf(fmt,avg_std1)           ; plot center string
 
-
   plot = gsn_csm_contour_map(wks,avail1, res)  ; create plot
 ;************************************************
-  wks1 = gsn_open_wks("png","avail_2_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+  wks1 = gsn_open_wks("ps","FigureS1_"+"OBS_CDS-TTC-IASI-B"+att)    
   plot2=new(2,"graphic")
   gsn_define_colormap(wks1,"MPL_YlGn")
   res1 = True                                    ; plot mods desired
@@ -166,7 +237,7 @@ avail_ts_Ar&time=tropoz&time
    gsn_panel(wks1,plot2,(/2,1/),False)
  frame(wks1)
 ;************************************************
-  wks2 = gsn_open_wks("png","avail_3_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+  wks2 = gsn_open_wks("ps","Figure2_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
   plot3=new(2,"graphic")
   gsn_define_colormap(wks2,"MPL_YlGn")
   res2 = True                                    ; plot mods desired
@@ -242,7 +313,7 @@ avail_ts_Ar&time=tropoz&time
    ts_regions!0="region"
    ts_regions!1="time" 
    ts_regions&time=tropoz&time
- wks4 = gsn_open_wks("png","avail_ts_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+ wks4 = gsn_open_wks("ps","Figure3_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
  ; plot4=new(2,"graphic")
 
  res11=True

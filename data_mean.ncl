@@ -1,40 +1,120 @@
 ;*************************************************
-load "statistics2.ncl"
 load "$NCARG_ROOT/lib/ncarg/nclscripts/contrib/time_axis_labels.ncl"
 ;************************************************
+;functions
+; #############################################################################
+undef("coswgt_area_average")
+function coswgt_area_average(field:numeric)
+;
+; Arguments
+;    field: numeric field.
+;
+; Return value
+;    The area average using cosine lat weights.
+;
+; Description
+;    Computes the area average using cosine lat weights and lon weights=1.
+;
+local funcname, scriptname, lat, wgt_lat, lon, lon_size, wgt_lon, ave
 begin
+
+  funcname = "coswgt_area_average"
+  scriptname = "diag_scripts/shared/statistics.ncl"
+
+  lat = field&lat
+  wgt_lat = tofloat(NormCosWgtGlobe(lat))
+
+  lon = field&lon
+  lon_size = dimsizes(lon)
+  wgt_lon = new((/lon_size(0)/), float)
+  wgt_lon = 1.0
+
+  ave = wgt_areaave_Wrap(field, wgt_lat, wgt_lon, 0)
+  return(ave)
+
+end
+; #############################################################################
+undef("coswgt_area_std")
+function coswgt_area_std(field:numeric)
+;
+; Arguments
+;    field: numeric field.
+;
+; Return value
+;    The area average using cosine lat weights.
+;
+; Description
+;    Computes the area average using cosine lat weights and lon weights=1.
+;
+begin
+
+  funcname = "coswgt_area_std"
+
+   lat = field&lat
+   lon = field&lon
+   re   = 6.37122e06
+   rad  = 4.0 * atan(1.0) / 180.0
+   con  = re * rad
+   clat = cos(lat * rad)           ; cosine of latitude
+   dlon = (lon(2) - lon(1))        ; assume dlon is constant
+   dlat = (lat(2) - lat(1))        ; assume dlat is constant
+
+   dx   = con * dlon * clat        ; dx at each latitude
+   dy   = con * dlat               ; dy is constant
+   dydx = dy * dx                  ; dydx(nlat)
+   nlat=dimsizes(lat)
+   mlon=dimsizes(lon)
+   wgt  = new((/nlat, mlon/), typeof(dydx))
+   wgt=conform (wgt, dydx, 0)
+
+
+
+   ave = wgt_areaave2(field, wgt, 0)
+   d2 = (field - ave) ^ 2 ;
+     ; Calculate weighted standard deviation
+   ss=sum(d2)
+   arg = wgt_areasum2(d2, wgt, 0)
+
+   v1 = sum(where(ismissing(field), wgt@_FillValue, wgt))
+   v2 = sum(where(ismissing(field), wgt@_FillValue, wgt) ^ 2)
+   dd=(v1 / (v1 ^ 2 - v2))
+
+   out = sqrt( arg*dd)
+
+  return(out)
+
+
+end
+
+begin
+
 ;************************************************
 ; read in netCDF file
 ;************************************************
  att="DAY" 
- a = addfile("/Users/irenecionni/obs_c3s/Tier3/CDS-TTC-IASI-B"+att+"/OBS_CDS-TTC-IASI-B_sat_L3_Amon_tropoz_201401-201812.nc" ,"r")
+ dir="/Users/irenecionni/"  
+ a = addfile(dir+"/obs_c3s/Tier3/CDS-TTC-IASI-B"+att+"/OBS_CDS-TTC-IASI-B_sat_L3_Amon_tropoz_201401-201812.nc" ,"r")
 ;************************************************
 ; read in zonal winds
 ;************************************************
   tropoz=a->tropoz                                
-  printVarSummary(tropoz)
   dim=dimsizes(tropoz)
-  print(dim)
   media_clim=dim_avg_n_Wrap(tropoz,0)
   std_clim=dim_stddev_n_Wrap(tropoz,0)
   clim1=clmMonTLL(tropoz)
-  printVarSummary(clim1)
   mer1=dim_avg_n_Wrap(tropoz,1)
-  printVarSummary(mer1)
   mer1_avg=dim_avg_n_Wrap(mer1,0)
   zon1=dim_avg_Wrap(tropoz)
-  printVarSummary(zon1)
   zon1_avg=dim_avg_n_Wrap(zon1,0)
-  printVarSummary(zon1_avg)
-  wks = gsn_open_wks("png","mean_1_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+  wks = gsn_open_wks("pdf","Figure3_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
   gsn_define_colormap(wks,"MPL_RdYlGn")
   gsn_reverse_colormap(wks)
   plot=new(12,"graphic")
   month_nam=(/"Jannuary","February","March","April","May","June","July","August","September","October","November","December"/)
   do itim=0,11
  
-    avg_clim1=coswgt_areaave(clim1(itim,:,:))
-    avg_std1=coswgt_areastd(clim1(itim,:,:))
+    avg_clim1=coswgt_area_average(clim1(itim,:,:))
+    avg_std1=coswgt_area_std(clim1(itim,:,:))
 
      res = True                                    ; plot mods desired
      res@gsnDraw                  = False            ; don't draw yet
@@ -59,10 +139,10 @@ begin
   end do
   resP=True
   resP@gsnPanelLabelBar    = True                ; add common colorbar
-   gsn_panel(wks,plot,(/4,3/),resP)
+  gsn_panel(wks,plot,(/4,3/),resP)
 
 ;************************************************
-  wks1 = gsn_open_wks("png","mer_1_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+  wks1 = gsn_open_wks("pdf","FigureS2_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
   plot2=new(2,"graphic")
   gsn_define_colormap(wks1,"MPL_RdYlGn")
   gsn_reverse_colormap(wks1)
@@ -115,7 +195,7 @@ begin
  frame(wks1)
 
 ;************************************************
-  wks3 = gsn_open_wks("png","zon_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
+  wks3 = gsn_open_wks("pdf","Figure4_"+"OBS_CDS-TTC-IASI-B"+att)                ; send graphics to PNG file
   plot3=new(2,"graphic")
   gsn_define_colormap(wks3,"MPL_RdYlGn")
   gsn_reverse_colormap(wks3)
@@ -173,63 +253,57 @@ begin
   res21@tmXBLabels      = (/"0.","0.2","0.4","0.6","0.8","1."/)
   res21@tmXBLabelFontHeightF=0.015
 
-;  res1@gsnAttachPlotsXAxis=True
   res21@xyLineColor      = "NavyBlue"
   res21@xyLineThicknessF  =3.5
   plot3(1) = gsn_csm_xy(wks3,zon1_avg,zon1_avg&lat, res21)  ; create plot
-;  newplot =  gsn_attach_plots(plot2(0),plot2(1),res1,res11)
- ;draw(plot2(0))
   resP1=True
-  ;resP@gsnPanelLabelBar    = True                ; add common colorbar
-   gsn_panel(wks3,plot3,(/1,2/),resP1)
- frame(wks3)
+  gsn_panel(wks3,plot3,(/1,2/),resP1)
+  frame(wks3)
 ;---------mean clim---------------------------------------------
-delete(res)
-  wks4=gsn_open_wks("png","media_OBS_CDS-TTC-IASI-B"+att)   
- gsn_define_colormap(wks4,"MPL_RdYlGn")
+  delete(res)
+  wks4=gsn_open_wks("pdf","Figure2_OBS_CDS-TTC-IASI-B"+att)   
+  gsn_define_colormap(wks4,"MPL_RdYlGn")
   gsn_reverse_colormap(wks4)
 
-  res = True                                    ; plot mods desired
+   res = True                                    ; plot mods desired
      
-     res@cnFillOn         = True               ; color Fill 
-     res@cnFillMode       = "RasterFill"       ; Raster Mode
-     res@cnLinesOn        =  False             ; Turn off contour lines 
-     res@cnLineLabelsOn       =False             
-     res@cnLevelSelectionMode = "ManualLevels"     ; set manual contour levels
-     res@cnMinLevelValF       = 7.               ; set min contour level
-     res@cnMaxLevelValF       = 23.               ; set max contour level
-     res@cnLevelSpacingF      = 1               ; set contour spacing
-     ;resn@cnLabelBarEndStyle="ExcludeOuterBoxes"
-     res@tiMainString         = "Mean "    ; plot title
-     fmt = "%3.2f"
-     res@gsnLeftString      = "[DU]"
-     res@gsnRightString     = "mean: "+sprintf(fmt,avg_clim1)+" std:"+sprintf(fmt,avg_std1)           ; plot center string
+   res@cnFillOn         = True               ; color Fill 
+   res@cnFillMode       = "RasterFill"       ; Raster Mode
+   res@cnLinesOn        =  False             ; Turn off contour lines 
+   res@cnLineLabelsOn       =False             
+   res@cnLevelSelectionMode = "ManualLevels"     ; set manual contour levels
+   res@cnMinLevelValF       = 7.               ; set min contour level
+   res@cnMaxLevelValF       = 23.               ; set max contour level
+   res@cnLevelSpacingF      = 1               ; set contour spacing
+   ;resn@cnLabelBarEndStyle="ExcludeOuterBoxes"
+   res@tiMainString         = "Mean "    ; plot title
+   fmt = "%3.2f"
+   res@gsnLeftString      = "[DU]"
+   res@gsnRightString     = "mean: "+sprintf(fmt,avg_clim1)+" std:"+sprintf(fmt,avg_std1)           ; plot center string
 
- ;    res@lbLabelBarOn = False
-     plot4 = gsn_csm_contour_map(wks4,media_clim(:,:), res)  ; create plot
-     delete(res)
-    frame (wks4)
-     wks5=gsn_open_wks("png","std_OBS_CDS-TTC-IASI-B"+att)
-    gsn_define_colormap(wks5,"NEO_div_vegetation_c")
+   plot4 = gsn_csm_contour_map(wks4,media_clim(:,:), res)  ; create plot
+   delete(res)
+   frame (wks4)
+   wks5=gsn_open_wks("pdf","std_OBS_CDS-TTC-IASI-B"+att)
+   gsn_define_colormap(wks5,"NEO_div_vegetation_c")
 
-      res = True                                    ; plot mods desired
-
-     res@cnFillOn         = True               ; color Fill
-     res@cnFillMode       = "RasterFill"       ; Raster Mode
-     res@cnLinesOn        =  False             ; Turn off contour lines
-     res@cnLineLabelsOn       =False
-     ;resn@cnLabelBarEndStyle="ExcludeOuterBoxes"
-     res@tiMainString         = "Standard Deviation "    ; plot title
-     fmt = "%3.2f"
-     res@gsnLeftString      = "[DU]"
+   res = True                                    ; plot mods desired
+   res@cnFillOn         = True               ; color Fill
+   res@cnFillMode       = "RasterFill"       ; Raster Mode
+   res@cnLinesOn        =  False             ; Turn off contour lines
+   res@cnLineLabelsOn       =False
+   ;resn@cnLabelBarEndStyle="ExcludeOuterBoxes"
+   res@tiMainString         = "Standard Deviation "    ; plot title
+   fmt = "%3.2f"
+   res@gsnLeftString      = "[DU]"
 ;     res@gsnRightString     = "mean: "+sprintf(fmt,avg_clim1)+" std:"+sprintf(fmt,avg_std1)           ; plot center string
 
 ;     res@lbLabelBarOn = False
-res@cnLevelSelectionMode = "ManualLevels"     ; set manual contour levels 
-     res@cnMinLevelValF       = -1               ; set min contour level
-     res@cnMaxLevelValF       = 3.               ; set max contour level
-     res@cnLevelSpacingF      = 0.3               ; set contour spacing
-      plot5 = gsn_csm_contour_map(wks5,std_clim(:,:), res)  ; create plot
-    frame (wks5)
+   res@cnLevelSelectionMode = "ManualLevels"     ; set manual contour levels 
+   res@cnMinLevelValF       = -1               ; set min contour level
+   res@cnMaxLevelValF       = 3.               ; set max contour level
+   res@cnLevelSpacingF      = 0.3               ; set contour spacing
+   plot5 = gsn_csm_contour_map(wks5,std_clim(:,:), res)  ; create plot
+   frame (wks5)
 
 end
